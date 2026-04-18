@@ -1,0 +1,44 @@
+{
+  "display_information": {
+    "name": "MLA Heir",
+    "description": "Heir — MLA's Business Developer, Stefan's strategic peer. Weekly strategic reviews, finance pulse, opportunity scans, and revenue recommendations.",
+    "background_color": "#1a1a2e",
+    "long_description": "Heir is a strategic peer to MLA's founder Stefan Stešević, hungry for growth and revenue. It monitors the €200k deficit recovery across three workstreams (grants, BI-as-a-service commercialization, revenue diversification), delivers weekly strategic reviews on Mondays, finance pulse on Fridays, and daily opportunity scans. Heir advises other MLA agents on quality and proposes revenue-generating actions directly to Stefan."
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "MLA Heir",
+      "always_online": true
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "chat:write",
+        "chat:write.public",
+        "im:history",
+        "im:read",
+        "im:write",
+        "files:read",
+        "channels:read",
+        "users:read"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://mla-business-developer.up.railway.app/slack/heir/events",
+      "bot_events": [
+        "message.im",
+        "file_shared"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://mla-business-developer.up.railway.app/slack/heir/interactions"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
