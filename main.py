@@ -242,6 +242,29 @@ async def api_advise_agent(payload: dict) -> dict:
     }
 
 
+@app.post("/api/bd/query-airtable", dependencies=[Depends(require_bd_key)])
+async def api_query_airtable(payload: dict) -> dict:
+    """T3 — Ad-hoc Airtable query for Heir.
+
+    Body:
+      - table_name: str  ('GRANT_APPLICATION', 'INVOICE', alias accepted)
+      - filter_formula: str (Airtable formula — optional)
+      - fields: list[str] (optional; defaults to all)
+      - max_records: int (default 50, cap 200)
+      - sort: list[{field, direction}] (optional)
+    """
+    from finance.airtable_query import query_airtable
+    if not payload or "table_name" not in payload:
+        raise HTTPException(status_code=400, detail="table_name required")
+    return await query_airtable(
+        table_name=payload["table_name"],
+        filter_formula=payload.get("filter_formula"),
+        fields=payload.get("fields"),
+        max_records=payload.get("max_records", 50),
+        sort=payload.get("sort"),
+    )
+
+
 @app.post("/api/bd/save-strategic-note", dependencies=[Depends(require_bd_key)])
 async def api_save_note(payload: dict) -> dict:
     from superknowledge import client as sk
