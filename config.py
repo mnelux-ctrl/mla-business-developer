@@ -73,6 +73,12 @@ HEIR_WEEKLY_ENABLED: str = _optional("HEIR_WEEKLY_ENABLED", "on")
 HEIR_FINANCE_ENABLED: str = _optional("HEIR_FINANCE_ENABLED", "on")
 HEIR_SCAN_ENABLED: str = _optional("HEIR_SCAN_ENABLED", "on")
 
+# ── Team Manager aggregation relay (sensible-defaults Rule 1) ───────────────
+# Heir posts weekly/Friday/daily scheduler outputs via TM relay instead of
+# DMing Stefan directly. Graceful fallback to direct DM if key unset.
+TEAM_MANAGER_URL: str = _optional("TEAM_MANAGER_URL", "https://mla-team-manager-production.up.railway.app")
+TEAM_MANAGER_API_KEY: str = _optional("TEAM_MANAGER_API_KEY", "")
+
 TIMEZONE: str = _optional("TIMEZONE", "Europe/Podgorica")
 
 # ── Organization ───────────────────────────────────────────────────────────
