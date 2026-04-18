@@ -54,6 +54,36 @@ def register_handlers(app: AsyncApp) -> None:
 
         await _post(client, channel, reply)
 
+        # SuperKnowledge auto-learn from Stefan's DM (Stefan directive 2026-04-19:
+        # "važno je samo šta god kome da kažem, da se iz toga builduje njihovo znanje")
+        try:
+            if len(text) >= 30 and getattr(config, "SUPERKNOWLEDGE_URL", "") \
+                    and getattr(config, "SUPERKNOWLEDGE_API_KEY", ""):
+                import httpx as _hx
+                lower = text.lower()
+                is_rule = any(k in lower for k in (
+                    "uvijek", "nikad", "nikada", "pravilo", "always", "never", "rule",
+                ))
+                category = "preference" if is_rule else "fact"
+                audience = ["all"] if is_rule else ["heir"]
+                async with _hx.AsyncClient(timeout=15) as _c:
+                    await _c.post(
+                        f"{config.SUPERKNOWLEDGE_URL.rstrip('/')}/api/learn",
+                        headers={"Authorization": f"Bearer {config.SUPERKNOWLEDGE_API_KEY}"},
+                        json={
+                            "content": text[:500],
+                            "category": category,
+                            "source_agent": "stefan",
+                            "metadata": {
+                                "channel": "slack_heir",
+                                "response_preview": (reply or "")[:200],
+                                "applies_to": audience,
+                            },
+                        },
+                    )
+        except Exception as e:
+            logger.warning(f"Heir auto-learn failed (non-fatal): {e}")
+
     @app.event("file_shared")
     async def on_file_shared(body: dict, event: dict, client, ack):
         await ack()
