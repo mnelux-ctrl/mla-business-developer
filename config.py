@@ -21,9 +21,12 @@ def _optional(name: str, default: str = "") -> str:
 ANTHROPIC_API_KEY: str = _require("ANTHROPIC_API_KEY")
 OPENAI_API_KEY: str = _optional("OPENAI_API_KEY", "")  # Whisper only
 
-# Heir uses Opus for strategic reasoning, Sonnet for daily ops / chat.
-BD_OPUS_MODEL: str = _optional("BD_OPUS_MODEL", "claude-opus-4-5-20251001")
-BD_SONNET_MODEL: str = _optional("BD_SONNET_MODEL", "claude-sonnet-4-6-20251001")
+# Stefan budget rule 2026-04-19: Heir runs on GPT-5.4 for scheduler jobs
+# + peer review. BD_OPUS/SONNET retained for chat.py tool-use loop (still
+# on Anthropic SDK — migration pending, lower priority since human-initiated).
+BD_REASONER_MODEL: str = _optional("BD_REASONER_MODEL", "gpt-5.4")
+BD_OPUS_MODEL: str = _optional("BD_OPUS_MODEL", "claude-sonnet-4-6")      # legacy, chat.py only
+BD_SONNET_MODEL: str = _optional("BD_SONNET_MODEL", "claude-sonnet-4-6")  # legacy, chat.py only
 
 # ── API Security ───────────────────────────────────────────────────────────
 BD_API_KEY: str = _require("BD_API_KEY")

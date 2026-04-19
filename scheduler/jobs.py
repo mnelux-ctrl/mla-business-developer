@@ -1,15 +1,18 @@
 """scheduler/jobs.py — Heir strategic jobs.
 
 Three jobs:
-  1. weekly_strategic_review()  — Mon 09:00 Europe/Podgorica (Opus)
-  2. finance_pulse_report()     — Fri 09:15 Europe/Podgorica (Sonnet)
-  3. opportunity_scan()         — Daily 10:00 Europe/Podgorica (Sonnet)
+  1. weekly_strategic_review()  — Mon 09:00 Europe/Podgorica
+  2. finance_pulse_report()     — Fri 09:15 Europe/Podgorica
+  3. opportunity_scan()         — Daily 10:00 Europe/Podgorica
+
+Stefan budget rule: all three jobs now run on GPT-5.4 (not Opus/Sonnet).
+Switched 2026-04-19. Claude reserved for Viktorija draft_full_proposal only.
 
 Each job:
   - Builds the prompt from live data (finance pulse, SK, sibling services)
-  - Calls Anthropic with appropriate model
-  - Posts result to Stefan's Slack DM (if configured)
-  - Logs the output to Redis under a job-specific key
+  - Calls OpenAI GPT-5.4
+  - Posts result to Stefan's Slack DM (via TM relay preferred)
+  - Logs output to Redis under a job-specific key
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from anthropic import AsyncAnthropic
+import httpx
 
 import config
 from finance.pulse import get_pulse
@@ -27,14 +30,42 @@ from superknowledge import client as sk
 
 logger = logging.getLogger(__name__)
 
-_client: Optional[AsyncAnthropic] = None
 
-
-def _anthropic() -> AsyncAnthropic:
-    global _client
-    if _client is None:
-        _client = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
-    return _client
+async def _openai_chat(system: str, user: str, max_tokens: int = 2500) -> str:
+    """Call GPT-5.4 chat completion. Returns content text or empty string."""
+    api_key = getattr(config, "OPENAI_API_KEY", "")
+    if not api_key:
+        logger.warning("OPENAI_API_KEY not set — Heir GPT call skipped")
+        return ""
+    model = getattr(config, "BD_REASONER_MODEL", "gpt-5.4")
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            r = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "max_completion_tokens": max_tokens,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                },
+            )
+            if r.status_code != 200:
+                logger.warning(f"GPT call non-200: {r.status_code} {r.text[:300]}")
+                return ""
+            data = r.json()
+            choices = data.get("choices", [])
+            if not choices:
+                return ""
+            return (choices[0].get("message") or {}).get("content", "").strip()
+    except Exception as e:
+        logger.warning(f"GPT call failed: {e}")
+        return ""
 
 
 # ── Weekly strategic review (Monday) ──────────────────────────────────
@@ -80,18 +111,9 @@ in Montenegrin, otherwise English. Short sentences. No corporate mush."""
 
     system_prompt = _system_with_sk(sk_ctx)
 
-    try:
-        client = _anthropic()
-        resp = await client.messages.create(
-            model=config.BD_OPUS_MODEL,
-            max_tokens=4000,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        text = _extract_text(resp.content) or "(no content)"
-    except Exception as e:
-        logger.exception("weekly_strategic_review LLM call failed")
-        text = f"(Heir weekly review failed: {type(e).__name__}: {e})"
+    text = await _openai_chat(system_prompt, user_prompt, max_tokens=4000)
+    if not text:
+        text = "(Heir weekly review failed — check OPENAI_API_KEY or logs)"
 
     item = {
         "type": "weekly_strategic_review",
@@ -136,18 +158,9 @@ Short. Numbers first. If any alert fires, start the message with 🚨."""
 
     system_prompt = _system_with_sk(sk_ctx)
 
-    try:
-        client = _anthropic()
-        resp = await client.messages.create(
-            model=config.BD_SONNET_MODEL,
-            max_tokens=2500,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        text = _extract_text(resp.content) or "(no content)"
-    except Exception as e:
-        logger.exception("finance_pulse_report LLM call failed")
-        text = f"(Finance pulse report failed: {type(e).__name__}: {e})"
+    text = await _openai_chat(system_prompt, user_prompt, max_tokens=2500)
+    if not text:
+        text = "(Finance pulse report failed — check OPENAI_API_KEY or logs)"
 
     item = {
         "type": "finance_pulse",
@@ -197,18 +210,9 @@ If nothing interesting, say so — don't fabricate."""
 
     system_prompt = _system_with_sk(sk_ctx)
 
-    try:
-        client = _anthropic()
-        resp = await client.messages.create(
-            model=config.BD_SONNET_MODEL,
-            max_tokens=2500,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        text = _extract_text(resp.content) or "(no content)"
-    except Exception as e:
-        logger.exception("opportunity_scan LLM call failed")
-        text = f"(Opportunity scan failed: {type(e).__name__}: {e})"
+    text = await _openai_chat(system_prompt, user_prompt, max_tokens=2500)
+    if not text:
+        text = "(Opportunity scan failed — check OPENAI_API_KEY or logs)"
 
     item = {
         "type": "opportunity_scan",
@@ -280,14 +284,6 @@ def _system_with_sk(sk_ctx: str) -> str:
     if sk_ctx:
         parts.append(sk_ctx)
     return "\n\n".join(parts)
-
-
-def _extract_text(content_blocks: list) -> str:
-    parts: list[str] = []
-    for b in content_blocks:
-        if getattr(b, "type", None) == "text":
-            parts.append(b.text)
-    return "\n".join(parts).strip()
 
 
 def _safe_json(obj: Any) -> str:

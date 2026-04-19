@@ -197,9 +197,9 @@ async def api_advise_agent(payload: dict) -> dict:
     if not payload or "content" not in payload or "agent" not in payload:
         raise HTTPException(status_code=400, detail="agent and content required")
 
-    from anthropic import AsyncAnthropic
     from brain.heir import PERSONA
     from superknowledge import client as sk
+    import httpx
 
     sk_ctx = await sk.load_strategic_context()
     system = PERSONA + ("\n\n" + sk_ctx if sk_ctx else "")
@@ -218,18 +218,38 @@ async def api_advise_agent(payload: dict) -> dict:
         f"4. Score /10"
     )
 
-    client = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
+    # Stefan budget rule 2026-04-19: GPT-5.4 default; Claude reserved only
+    # for Viktorija draft_full_proposal. Heir peer review is structured
+    # reasoning — GPT handles it equally well.
+    openai_key = getattr(config, "OPENAI_API_KEY", "")
+    if not openai_key:
+        return {"error": "OPENAI_API_KEY not configured"}
+    model = getattr(config, "BD_REASONER_MODEL", "gpt-5.4")
     try:
-        resp = await client.messages.create(
-            model=config.BD_SONNET_MODEL,
-            max_tokens=1500,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        text_parts = [
-            b.text for b in resp.content if getattr(b, "type", None) == "text"
-        ]
-        verdict = "\n".join(text_parts).strip() or "(no content)"
+        async with httpx.AsyncClient(timeout=60) as c:
+            r = await c.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openai_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "max_completion_tokens": 1500,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                },
+            )
+            if r.status_code != 200:
+                return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
+            data = r.json()
+            choices = data.get("choices", [])
+            if not choices:
+                verdict = "(no content)"
+            else:
+                verdict = (choices[0].get("message") or {}).get("content", "").strip() or "(no content)"
     except Exception as e:
         logger.exception("advise-agent LLM call failed")
         return {"error": f"{type(e).__name__}: {e}"}
