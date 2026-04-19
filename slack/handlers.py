@@ -33,17 +33,63 @@ def register_handlers(app: AsyncApp) -> None:
         }:
             return
 
-        # file-only messages are handled by file_shared below
-        if event.get("files") and not (event.get("text") or "").strip():
-            return
-
         channel = event.get("channel")
         ts = event.get("ts")
         text = (event.get("text") or "").strip()
-        if not channel or not ts or not text:
+        files = event.get("files", []) or []
+
+        if not channel or not ts:
+            return
+
+        # Voice-only files still handled by on_file_shared
+        if files and not text and any(
+            "audio" in (f.get("mimetype") or "").lower() for f in files
+        ):
             return
 
         if not await _claim_event(ts):
+            return
+
+        # ── Auto-extract text from non-voice attachments ─────────────────
+        # Pull PDFs/DOCX/XLSX/PPTX/image bodies through mla-doc-reader so
+        # the Heir brain sees the content as conversation context.
+        non_voice_files = [
+            f for f in files
+            if "audio" not in (f.get("mimetype") or "").lower()
+            and f.get("subtype", "") != "slack_audio"
+            and f.get("mode") != "voice"
+        ]
+        if non_voice_files:
+            try:
+                from shared.doc_reader import read_slack_file
+                doc_blocks: list[str] = []
+                for f in non_voice_files:
+                    name = f.get("name", "") or f.get("title", "") or "(unnamed file)"
+                    try:
+                        res = await asyncio.to_thread(
+                            read_slack_file, f, config.SLACK_HEIR_BOT_TOKEN,
+                        )
+                    except Exception as e:
+                        logger.warning(f"doc-reader call failed for {name}: {e}")
+                        res = {"ok": False, "error": str(e)}
+                    if res.get("ok"):
+                        body = (res.get("text") or "").strip()
+                        if body:
+                            doc_blocks.append(
+                                f"--- Attached file: {name} ({res.get('char_count',0)} chars) ---\n{body}"
+                            )
+                        else:
+                            doc_blocks.append(f"--- Attached file: {name} (no text extracted) ---")
+                    else:
+                        err = res.get("error", "unknown")
+                        doc_blocks.append(f"--- Attached file: {name} (doc-reader error: {err[:200]}) ---")
+                if doc_blocks:
+                    prefix = "\n\n".join(doc_blocks)
+                    text = f"{prefix}\n\n{text}".strip() if text else prefix
+            except Exception as e:
+                logger.warning(f"shared.doc_reader unavailable: {e}")
+
+        if not text:
             return
 
         try:

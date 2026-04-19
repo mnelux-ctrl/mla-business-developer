@@ -15,6 +15,31 @@ logger = logging.getLogger(__name__)
 async def dispatch(tool_name: str, tool_input: dict) -> Any:
     """Route a tool call to its implementation and return JSON-serializable result."""
     try:
+        # ── Shared doc reader ─────────────────────────────────────────
+        if tool_name == "read_document":
+            import asyncio
+            import config
+            from shared.doc_reader import read_document_url
+            bot_token = getattr(config, "SLACK_HEIR_BOT_TOKEN", "") or ""
+            try:
+                res = await asyncio.to_thread(
+                    read_document_url,
+                    tool_input["url"],
+                    slack_bot_token=bot_token or None,
+                )
+            except Exception as e:
+                return {"success": False, "error": f"read_document raised: {e}"}
+            if not res.get("ok"):
+                return {"success": False, "error": res.get("error") or "unknown doc-reader error"}
+            return {
+                "success": True,
+                "source": res.get("source"),
+                "filename": res.get("filename"),
+                "char_count": res.get("char_count"),
+                "truncated": res.get("truncated"),
+                "text": res.get("text", ""),
+            }
+
         # ── Strategic reviews ──────────────────────────────────────────
         if tool_name == "run_weekly_strategic_review":
             from scheduler.jobs import weekly_strategic_review
