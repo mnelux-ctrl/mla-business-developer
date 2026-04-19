@@ -16,10 +16,10 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-import httpx
 from slack_sdk.web.async_client import AsyncWebClient
 
 import config
+from shared.tm_relay import relay as tm_relay
 
 logger = logging.getLogger(__name__)
 
@@ -38,35 +38,28 @@ def _client_or_none() -> Optional[AsyncWebClient]:
 
 
 async def _relay_via_team_manager(
-    title: str, body: str, kind: str = "self_report", severity: str = "info"
+    title: str, body: str, kind: str = "self_report", severity: str = "medium"
 ) -> bool:
-    """POST to TM /api/tm/receive-agent-report. Returns True on success."""
-    base = (getattr(config, "TEAM_MANAGER_URL", "") or "").rstrip("/")
-    key = getattr(config, "TEAM_MANAGER_API_KEY", "") or ""
-    if not base or not key:
+    """POST to TM /api/tm/receive-agent-report via shared/tm_relay.
+
+    Normalizes legacy severity ('info'→'medium', 'error'→'high') to
+    shared.tm_relay.ALLOWED_SEVERITY.
+    """
+    sev_map = {"info": "medium", "error": "high", "warn": "medium"}
+    severity = sev_map.get(severity, severity)
+    if severity not in ("low", "medium", "high"):
+        severity = "medium"
+
+    result = await tm_relay(
+        kind=kind, title=title, body=body, severity=severity, audience="stefan",
+    )
+    if result.get("error"):
+        logger.warning(f"TM relay error: {result['error']}")
         return False
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(
-                f"{base}/api/tm/receive-agent-report",
-                headers={"Authorization": f"Bearer {key}"},
-                json={
-                    "agent": "heir",
-                    "kind": kind,
-                    "title": title,
-                    "body": body,
-                    "severity": severity,
-                    "audience": "stefan",
-                },
-            )
-            j = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
-            if not j.get("ok"):
-                logger.warning(f"TM relay failed: status={r.status_code} body={j or r.text[:200]}")
-                return False
-            return True
-    except Exception as e:
-        logger.warning(f"TM relay exception: {e}")
+    if result.get("stub"):
+        logger.info("TM relay stub (not configured) — falling back to direct DM.")
         return False
+    return True
 
 
 def _split_title_body(text: str) -> tuple[str, str]:
